@@ -144,7 +144,8 @@ error.mean()
 # %% 
 100*error.mean()/real.mean()
 
-# %% 
-
+# %% 2017-03-29
+new_ref_date = dt.datetime.strptime("29/03/2017","%d/%m/%Y")
+new_df = getVolatilityEstimation(new_ref_date,63)
 
 # %% 
