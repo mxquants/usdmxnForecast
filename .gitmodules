@@ -1,3 +1,6 @@
 [submodule "quanta"]
 	path = quanta
 	url = https://github.com/mxquants/quanta.git
+[submodule "metallic_blue_lizard"]
+	path = metallic_blue_lizard
+	url = git@github.com:RHDZMOTA/metallic_blue_lizard.git
