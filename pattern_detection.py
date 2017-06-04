@@ -9,7 +9,9 @@ os.chdir("/media/rhdzmota/Data/Files/github_mxquants/usdmxnForecast")
 import numpy as np
 import pandas as pd
 import quanta as mx
+import datetime as dt
 import matplotlib.pyplot as plt
+from metallic_blue_lizard.neural_net import competitive_neurons
 
 
 def lagMatrix(df, lag=5):
@@ -20,6 +22,32 @@ def lagMatrix(df, lag=5):
     return input_data
 
 
+def string2datetime(x):
+    """."""
+    return dt.datetime.strptime(x, "%d/%m/%Y")
+
+
+def numericDf(df):
+    """."""
+    df["timestamp"] = df["timestamp"].apply(string2datetime).values
+    df["values"] = df["values"].apply(np.float).values
+    return df
+
+
 # Test
 df = mx.data.getBanxicoSeries("usdmxn_fix")
-lags = lagMatrix(df)
+df = numericDf(df)
+df_lags = lagMatrix(df[["values"]], lag=5)
+
+# Detect patterns
+cn = competitive_neurons(neurons=8, x_data=df_lags)
+cn.train(max_iter=1000)
+cn.evaluate()
+
+neurons = np.unique(cn.y)
+print('Neurons that found a cluster: {}'.format(neurons))
+
+for i in cn.w.columns:
+    temp = cn.w[i]
+    plt.plot(temp)
+plt.show()
