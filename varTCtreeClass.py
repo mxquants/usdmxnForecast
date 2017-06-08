@@ -5,7 +5,12 @@ Created on Sun Jun  4 10:50:47 2017
 @author: danie
 """
 
-#%%
+# %% Change directory (windows)
+
+import os
+os.chdir('C://Users//danie//Documents//tcForecast')
+
+# %%
 import quanta as mx 
 import numpy as np
 import pandas as pd
@@ -13,7 +18,6 @@ import matplotlib.pyplot as plt
 import datetime as dt 
 from sklearn.ensemble import RandomForestClassifier
 #%%
-
 mx.data.getAvailableBanxicoSeries()
 
 #%%
@@ -71,7 +75,7 @@ df = df.iloc[1:]
 df["close_1"] = close_values[:-1]
 df["high_1"] = high_values[:-1]
 df["low_1"] = low_values[:-1]
-#%%
+#%% Data frame con las relaciones de las variables
 functions = {"close/high":lambda x: np.log(x["close"]/x["high"]),
              "close/low":lambda x: np.log(x["close"]/x["low"]),
              "close/open":lambda x: np.log(x["close"]/x["open"]),
@@ -85,7 +89,35 @@ for k in functions:
     relation_df[k] = df.apply(functions[k],1).values
 
 relation_df = pd.DataFrame(relation_df)
+
+#%% Vector de salidas (alza o baja en el TC)
+"""
+
+actual = df['fix'][1:]
+anterior = df['fix'][:-1]
+
+salida = np.array(actual) > np.array(anterior)
+salida = salida.astype(int)
+
+porcentajeAlza =  sum(salida)/len(salida)
+porcentajeBaja =  1 - porcentajeAlza 
+
+s = pd.DataFrame(salida)
+  
+"""
+
 #%%
 
-RandomForestClassifier()
+"""
+RandomForestClassifier(n_estimators=10, criterion='gini', max_depth=None, min_samples_split=2, min_samples_leaf=1, min_weight_fraction_leaf=0.0, max_features='auto', max_leaf_nodes=None, min_impurity_split=1e-07, bootstrap=True, oob_score=False, n_jobs=1, random_state=None, verbose=0, warm_start=False, class_weight=None)
+
+"""
+
+RandomForestClassifier(10,criterion='gini',)
+
+#%%
+
+
+
+
 
