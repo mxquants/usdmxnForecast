@@ -12,7 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import datetime as dt
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-
+from sklearn.metrics import roc_curve
 
 def string2datetime(x):
     """."""
@@ -31,7 +31,7 @@ def variablesTC(df_dict):
     general_df = pd.DataFrame([])
 
     for k in df_dict:
-        df = df_dict[k] #numericDf(df_dict[k])
+        df = df_dict[k]  # numericDf(df_dict[k])
         df.index = df["timestamp"].values
         del df["timestamp"]
         df.columns = [k]
@@ -46,18 +46,18 @@ def cutDf(df, refence_date):
     reference_index = df["timestamp"] > date
     return df[reference_index]
 
-
 _fix = mx.data.getBanxicoSeries("usdmxn_fix")
 _close = mx.data.getBanxicoSeries("usdmxn_close_long")
 _open = mx.data.getBanxicoSeries("usdmxn_open_long")
 _high = mx.data.getBanxicoSeries("usdmxn_max")
 _low = mx.data.getBanxicoSeries("usdmxn_min")
 
-df_dict = {"fix": cutDf(numericDf(_fix.copy()), "01/01/2010"),
-           "close": cutDf(numericDf(_close.copy()), "01/01/2010"),
-           "open": cutDf(numericDf(_open.copy()), "01/01/2010"),
-           "high": cutDf(numericDf(_high.copy()), "01/01/2010"),
-           "low": cutDf(numericDf(_low.copy()), "01/01/2010")
+reference_date = "01/01/2014"
+df_dict = {"fix": cutDf(numericDf(_fix.copy()), reference_date),
+           "close": cutDf(numericDf(_close.copy()), reference_date),
+           "open": cutDf(numericDf(_open.copy()), reference_date),
+           "high": cutDf(numericDf(_high.copy()), reference_date),
+           "low": cutDf(numericDf(_low.copy()), reference_date)
            }
 
 df = variablesTC(df_dict).copy()
@@ -84,14 +84,14 @@ relation_df = {}
 for k in functions:
     relation_df[k] = df.apply(functions[k], 1).values
 
-x_data_reg = pd.DataFrame(relation_df)
-x_data_class = x_data_reg.iloc[1:].copy()
+x_data_reg = pd.DataFrame(relation_df)[:-1]
+x_data_class = x_data_reg.copy()
 
 actual = df['fix'][1:]
 anterior = df['fix'][:-1]
 salida = np.array(actual) > np.array(anterior)
 
-y_data_reg = df['fix']
+y_data_reg = df['fix'][1:]
 y_data_class = pd.DataFrame(salida)
 
 
@@ -107,17 +107,47 @@ dataset_class = mx.dataHandler.Dataset(input_data=x_data_class,
                                        normalize=None)
 
 # training model
-RFR = RandomForestRegressor()
-RFR.fit(x_data_reg, y_data_reg)
-y_estimated = RFR.predict(x_data_reg)
+RFR = RandomForestRegressor(n_estimators=100)
+real_reg_train = dataset_reg.train[1].reshape((dataset_reg.train[1].shape[0],))
+real_reg_test = dataset_reg.test[1].reshape((dataset_reg.test[1].shape[0],))
+RFR.fit(dataset_reg.train[0],
+        real_reg_train)
+y_estimated_trainreg = RFR.predict(dataset_reg.train[0])
+y_estimated_testreg = RFR.predict(dataset_reg.test[0])
+y_estimated_reg = RFR.predict(dataset_reg.input_data)
 
-RFC = RandomForestClassifier()
-RFC.fit(x_data_class, y_data_class)
-y_boolean =
-"""
-RandomForestClassifier(n_estimators=10, criterion='gini', max_depth=None, min_samples_split=2, min_samples_leaf=1, min_weight_fraction_leaf=0.0, max_features='auto', max_leaf_nodes=None, min_impurity_split=1e-07, bootstrap=True, oob_score=False, n_jobs=1, random_state=None, verbose=0, warm_start=False, class_weight=None)
-"""
 
-RandomForestClassifier(10, criterion='gini',)
+fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 6))
+plt.subplot(121)
+plt.plot(real_reg_train, real_reg_train, ".g", label="Real vals")
+plt.plot(real_reg_train, y_estimated_trainreg, ".b", label="Estimates")
+plt.title("Train")
+plt.xlabel("y-values")
+plt.ylabel("estimates")
+plt.legend()
+plt.subplot(122)
+plt.plot(real_reg_test, real_reg_test, ".g", label="Real vals")
+plt.plot(real_reg_test, y_estimated_testreg, ".r", label="Estimates")
+plt.title("Test")
+plt.xlabel("y-values")
+plt.ylabel("estimates")
+plt.legend()
+plt.show()
 
-#%%
+RFC = RandomForestClassifier(n_estimators=100)
+real_class_train = dataset_class.train[1].reshape(
+                                    (dataset_class.train[1].shape[0],))
+real_class_test = dataset_class.test[1].reshape(
+                                    (dataset_class.test[1].shape[0],))
+RFC.fit(dataset_class.train[0],
+        real_class_train)
+y_estimated_trainclass = RFC.predict(dataset_class.train[0])
+y_estimated_testclass = RFC.predict(dataset_class.test[0])
+y_estimated = RFC.predict(dataset_class.input_data)
+sum(real_class_train == y_estimated_trainclass) / len(y_estimated_trainclass)
+sum(real_class_test == y_estimated_testclass) / len(y_estimated_testclass)
+
+
+
+#roc_test = roc_curve(real_class_train, y_estimated_trainclass)
+#plt.plot(roc_test)
