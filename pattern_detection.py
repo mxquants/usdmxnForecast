@@ -33,20 +33,30 @@ def numericDf(df):
     return df
 
 
+def cutDf(df, refence_date):
+    """."""
+    date = string2datetime(refence_date)
+    reference_index = df["timestamp"] > date
+    return df[reference_index]
+
+
 # Test
 df = mx.data.getBanxicoSeries("usdmxn_fix")
 df = numericDf(df)
-df_lags = lagMatrix(df[["values"]], lag=5)
+df = cutDf(df, "01/01/2010")
+rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
+rend_df = pd.DataFrame({"rends": rend})
+df_lags = lagMatrix(rend_df, lag=5)
 
 # Detect patterns
 cn = competitive_neurons(neurons=15, x_data=df_lags)
-cn.train(max_iter=5000, eta=0.2)
+cn.train(max_iter=5000, eta=0.005)
 cn.evaluate()
 
 neurons = np.unique(cn.y)
 print('Neurons that found a cluster: {}'.format(neurons))
 cn.cost
-for i in cn.w.columns:
+for i in neurons:
     temp = cn.w[i]
     plt.plot(temp)
 plt.show()
