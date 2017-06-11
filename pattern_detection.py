@@ -43,14 +43,14 @@ def cutDf(df, refence_date):
 # Test
 df = mx.data.getBanxicoSeries("usdmxn_fix")
 df = numericDf(df)
-df = cutDf(df, "01/01/2010")
+df = cutDf(df, "01/01/2014")
 rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
 rend_df = pd.DataFrame({"rends": rend})
 df_lags = lagMatrix(rend_df, lag=5)
 
 # Detect patterns
-cn = competitive_neurons(neurons=15, x_data=df_lags)
-cn.train(max_iter=5000, eta=0.005)
+cn = competitive_neurons(neurons=10, x_data=df_lags)
+cn.train(max_iter=2500, eta=0.005)
 cn.evaluate()
 
 neurons = np.unique(cn.y)
@@ -60,3 +60,5 @@ for i in neurons:
     temp = cn.w[i]
     plt.plot(temp)
 plt.show()
+
+cn.w[neurons].to_pickle("competitive_neurons.pickle")
