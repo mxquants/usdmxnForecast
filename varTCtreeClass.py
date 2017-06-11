@@ -1,21 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Jun  4 10:50:47 2017
-
+import os
+os.chdir("/media/rhdzmota/Data/Files/github_mxquants/usdmxnForecast")
+os.chdir("C://Users//danie//Documents//tcForecast")
 @author: danie
 """
-
-# %% Change directory (windows)
-
-import os
-os.chdir('C://Users//danie//Documents//tcForecast')
-
-# %%
-import quanta as mx 
+import quanta as mx
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import datetime as dt 
+import datetime as dt
 from sklearn.ensemble import RandomForestClassifier
 #%%
 mx.data.getAvailableBanxicoSeries()
@@ -47,20 +42,20 @@ def numericDf(df):
     df["timestamp"] = df["timestamp"].apply(string2datetime).values
     df["values"] = df["values"].apply(np.float).values
     return df
-    
+
 
 def variablesTC(df_dict):
     general_df = pd.DataFrame([])
-               
+
     for k in df_dict:
         df = numericDf(df_dict[k])
         df.index =  df["timestamp"].values
         del  df["timestamp"]
         df.columns = [k]
         general_df = pd.concat([general_df,df], axis=1)
-          
+
     return general_df
-    
+
 #%%
 df = variablesTC(df_dict)
 df = df.dropna()
@@ -100,10 +95,10 @@ salida = np.array(actual) > np.array(anterior)
 salida = salida.astype(int)
 
 porcentajeAlza =  sum(salida)/len(salida)
-porcentajeBaja =  1 - porcentajeAlza 
+porcentajeBaja =  1 - porcentajeAlza
 
 s = pd.DataFrame(salida)
-  
+
 """
 
 #%%
@@ -116,8 +111,3 @@ RandomForestClassifier(n_estimators=10, criterion='gini', max_depth=None, min_sa
 RandomForestClassifier(10,criterion='gini',)
 
 #%%
-
-
-
-
-

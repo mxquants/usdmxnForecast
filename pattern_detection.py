@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-Pattern detection in financial time-series data.
+""" Pattern detection in financial time-series data.
+import os
+os.chdir("/media/rhdzmota/Data/Files/github_mxquants/usdmxnForecast")
+os.chdir("C://Users//danie//Documents//tcForecast")
 @author: Rodrigo Hernández-Mota
 """
-
-from imports import getImports
-exec(getImports())
-
 import numpy as np
 import pandas as pd
 import quanta as mx
@@ -42,7 +40,7 @@ df_lags = lagMatrix(df[["values"]], lag=5)
 
 # Detect patterns
 cn = competitive_neurons(neurons=15, x_data=df_lags)
-cn.train(max_iter=1000, eta=0.2)
+cn.train(max_iter=5000, eta=0.2)
 cn.evaluate()
 
 neurons = np.unique(cn.y)
