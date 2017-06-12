@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import datetime as dt
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import roc_curve
+from metallic_blue_lizard.neural_net import simple_logistic
+
 
 def string2datetime(x):
     """."""
@@ -46,13 +48,14 @@ def cutDf(df, refence_date):
     reference_index = df["timestamp"] > date
     return df[reference_index]
 
+
 _fix = mx.data.getBanxicoSeries("usdmxn_fix")
 _close = mx.data.getBanxicoSeries("usdmxn_close_long")
 _open = mx.data.getBanxicoSeries("usdmxn_open_long")
 _high = mx.data.getBanxicoSeries("usdmxn_max")
 _low = mx.data.getBanxicoSeries("usdmxn_min")
 
-reference_date = "01/01/2014"
+reference_date = "01/01/2008"
 df_dict = {"fix": cutDf(numericDf(_fix.copy()), reference_date),
            "close": cutDf(numericDf(_close.copy()), reference_date),
            "open": cutDf(numericDf(_open.copy()), reference_date),
@@ -76,9 +79,10 @@ functions = {"close/high": lambda x: np.log(x["close"]/x["high"]),
              "close/low": lambda x: np.log(x["close"]/x["low"]),
              "close/open": lambda x: np.log(x["close"]/x["open"]),
              "high/low": lambda x: np.log(x["high"]/x["low"]),
-             "high/high_1": lambda x: np.log(x["high"]/x["high_1"]),
+             # "high/high_1": lambda x: np.log(x["high"]/x["high_1"]),
              "low/low_1": lambda x: np.log(x["low"]/x["low_1"]),
-             "close/close_1": lambda x: np.log(x["close"]/x["close_1"])}
+             # "close/close_1": lambda x: np.log(x["close"]/x["close_1"])
+             }
 
 relation_df = {}
 for k in functions:
@@ -86,6 +90,7 @@ for k in functions:
 
 x_data_reg = pd.DataFrame(relation_df)[:-1]
 x_data_class = x_data_reg.copy()
+x_data_class.corr()
 
 actual = df['fix'][1:]
 anterior = df['fix'][:-1]
@@ -107,7 +112,7 @@ dataset_class = mx.dataHandler.Dataset(input_data=x_data_class,
                                        normalize=None)
 
 # training model
-RFR = RandomForestRegressor(n_estimators=100)
+RFR = RandomForestRegressor(n_estimators=50)
 real_reg_train = dataset_reg.train[1].reshape((dataset_reg.train[1].shape[0],))
 real_reg_test = dataset_reg.test[1].reshape((dataset_reg.test[1].shape[0],))
 RFR.fit(dataset_reg.train[0],
@@ -134,7 +139,7 @@ plt.ylabel("estimates")
 plt.legend()
 plt.show()
 
-RFC = RandomForestClassifier(n_estimators=100)
+RFC = RandomForestClassifier(n_estimators=10)
 real_class_train = dataset_class.train[1].reshape(
                                     (dataset_class.train[1].shape[0],))
 real_class_test = dataset_class.test[1].reshape(
@@ -146,6 +151,23 @@ y_estimated_testclass = RFC.predict(dataset_class.test[0])
 y_estimated = RFC.predict(dataset_class.input_data)
 sum(real_class_train == y_estimated_trainclass) / len(y_estimated_trainclass)
 sum(real_class_test == y_estimated_testclass) / len(y_estimated_testclass)
+
+y_score_trainclass = [i[-1] for i in RFC.predict_proba(dataset_class.train[0])]
+y_score_testclass = [i[-1] for i in RFC.predict_proba(dataset_class.test[0])]
+
+f,t,_ = roc_curve(real_class_test, y_score_testclass)
+
+plt.plot(f,t)
+plt.show()
+
+SL = simple_logistic(x_data=dataset_class.train[0],
+                     y_data=dataset_class.train[-1])
+SL.train()
+SL.evaluate()
+y_train = SL.probability.values
+
+SL.evaluate(x = dataset_class.test[0])
+y_test = SL.probability.values
 
 
 
