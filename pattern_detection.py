@@ -1,5 +1,7 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-""" Pattern detection in financial time-series data.
+"""Pattern detection in financial time-series data.
+
 import os
 os.chdir("/media/rhdzmota/Data/Files/github_mxquants/usdmxnForecast")
 os.chdir("C://Users//danie//Documents//tcForecast")
@@ -48,9 +50,17 @@ rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
 rend_df = pd.DataFrame({"rends": rend})
 df_lags = lagMatrix(rend_df, lag=5)
 
+# k-means
+dataset = mx.dataHandler.Dataset(input_data=df_lags, output_data=df_lags,
+                                 normalize=None)
+kmeans = mx.unsupervised.Kmeans(n_clusters=8)
+kmeans.train(dataset, epochs=5000)
+kmeans.c
+
+
 # Detect patterns
 cn = competitive_neurons(neurons=10, x_data=df_lags)
-cn.train(max_iter=2500, eta=0.005)
+cn.train(max_iter=5000, eta=0.005)
 cn.evaluate()
 
 neurons = np.unique(cn.y)
@@ -60,5 +70,10 @@ for i in neurons:
     temp = cn.w[i]
     plt.plot(temp)
 plt.show()
-
-cn.w[neurons].to_pickle("competitive_neurons.pickle")
+for i in kmeans.c:
+    temp = kmeans.c[i]
+    plt.plot(temp)
+plt.show()
+cn.w[neurons].to_pickle("competitive_neurons.pkl")
+pd.DataFrame(kmeans.c).to_pickle("kmeans.pkl")
+kmeans.nearest

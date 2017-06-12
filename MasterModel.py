@@ -1,5 +1,7 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-""" Master Model
+"""Master Model.
+
 import os
 os.chdir("/media/rhdzmota/Data/Files/github_mxquants/usdmxnForecast")
 os.chdir("C://Users//danie//Documents//tcForecast")
@@ -86,7 +88,8 @@ rend_lags.columns = [str(i)+"r" for i in rend_lags.columns]
 price_lags.columns = [str(i)+"p" for i in price_lags.columns]
 
 # Pattern matrix
-patterns = pd.read_pickle("competitive_neurons.pkl")
+patterns1 = pd.read_pickle("competitive_neurons.pkl")
+patterns2 = pd.read_pickle("kmeans.pkl")
 
 
 def getDistance(series, patterns):
@@ -103,7 +106,7 @@ def getDistance(series, patterns):
 
 
 detected_patterns = rend_lags.apply(lambda x: getDistance(x,
-                                                          patterns=patterns),
+                                                          patterns=patterns2),
                                     1)
 np.unique(detected_patterns)
 plt.hist(detected_patterns)
@@ -134,7 +137,7 @@ pattern_df = detected_patterns.apply(lambda x: pd.Series(
 
 # input / output
 output_data = prices.loc[nlags+ndays:]
-input_data = pd.concat([price_lags, rend_lags], axis=1)
+input_data = pd.concat([price_lags, rend_lags, pattern_df], axis=1)
 
 
 input_data.shape
@@ -191,7 +194,7 @@ plt.show()
 # Errors
 error_data = train.errors.values
 np.mean(error_data)
-desnormalize(np.mean(error_data),dataset)
+desnormalize(np.mean(error_data), dataset)
 
 distribution, kde = generateKDE(error_data, bandwidth=0.005)
 distribution.plot(x="x_data", y="density")
@@ -213,11 +216,11 @@ def desnormalize(value, dataset):
     return np.asscalar(value)
 
 
-dataset
-
-
+prices.values[-1]
 vector = list(prices.values[-nlags:]) + \
-                    list(getReturns(prices.values[-(nlags+1):]))
+                    list(getReturns(prices.values[-(nlags+1):])) + \
+                    one_hot(attrs=attrs, attr=getDistance(
+                                            prices.values[-nlags:], patterns2))
 vector = np.asarray(vector)
 vector = vector.reshape((vector.shape[0],))
 
