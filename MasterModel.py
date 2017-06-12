@@ -64,6 +64,52 @@ def getReturns(vector):
     return np.log(vector[1:]/vector[:-1])
 
 
+def getDistance(series, patterns):
+    """."""
+    leading_neuron = None
+    closest_distance = float("inf")
+    for neuron in patterns:
+        distance = np.linalg.norm(np.asarray(series) -
+                                  patterns[neuron].values)
+        if distance < closest_distance:
+            closest_distance = distance
+            leading_neuron = neuron
+    return leading_neuron
+
+
+def one_hot(attrs, attr):
+    """."""
+    def hot(x):
+        if x == attr:
+            return 1
+        else:
+            return 0
+    return [hot(a) for a in attrs]
+
+
+def numberOfWeights(dataset, hidden_layers, batch_ref=0.7):
+    """Get the number of parameters to estimate."""
+    n_input = np.shape(dataset.train[0])[-1]
+    n_output = np.shape(dataset.train[-1])[-1]
+    params = np.prod(np.array([n_input]+list(hidden_layers)+[n_output]))
+    n_elements = np.shape(dataset.train[0])[0]
+    return params, n_elements, batch_ref*n_elements > params
+
+
+def normalizeExternalData(vector, dataset):
+    """."""
+    _min, _max = dataset.min_x, dataset.max_x
+    vector = np.asarray(vector)
+    return (vector-_min)/(_max-_min)
+
+
+def desnormalize(value, dataset):
+    """."""
+    _min, _max = dataset.min_y, dataset.max_y
+    value = (_max-_min)*value + _min
+    return np.asscalar(value)
+
+
 # Variables
 ndays = 1
 nlags = 5
@@ -91,20 +137,6 @@ price_lags.columns = [str(i)+"p" for i in price_lags.columns]
 patterns1 = pd.read_pickle("competitive_neurons.pkl")
 patterns2 = pd.read_pickle("kmeans.pkl")
 
-
-def getDistance(series, patterns):
-    """."""
-    leading_neuron = None
-    closest_distance = float("inf")
-    for neuron in patterns:
-        distance = np.linalg.norm(np.asarray(series) -
-                                  patterns[neuron].values)
-        if distance < closest_distance:
-            closest_distance = distance
-            leading_neuron = neuron
-    return leading_neuron
-
-
 detected_patterns = rend_lags.apply(lambda x: getDistance(x,
                                                           patterns=patterns2),
                                     1)
@@ -119,17 +151,6 @@ for i in detected_patterns:
         patterns_hist[i] += 1
 patterns_hist
 
-
-def one_hot(attrs, attr):
-    """."""
-    def hot(x):
-        if x == attr:
-            return 1
-        else:
-            return 0
-    return [hot(a) for a in attrs]
-
-
 attrs = np.unique(detected_patterns)
 pattern_df = detected_patterns.apply(lambda x: pd.Series(
                                                 one_hot(attrs=attrs, attr=x)))
@@ -138,15 +159,86 @@ pattern_df = detected_patterns.apply(lambda x: pd.Series(
 # input / output
 output_data = prices.loc[nlags+ndays:]
 input_data = pd.concat([price_lags, rend_lags, pattern_df], axis=1)
-
+# input_data = pd.concat([price_lags, rend_lags], axis=1)
 
 input_data.shape
 output_data.shape
 
-# Create model
+# Explore model configuration
 dataset = mx.dataHandler.Dataset(input_data, output_data, normalize="minmax")
 _epochs = 2000
-_hdl = [10, 5, 5]
+max_hidden = 5
+max_neurons = 10
+mse = {"hidden": [], "neurons": [], "mse": []}
+hidden_vector = [None]
+temp_hidden_vector = [None]
+best_per_layer = []
+for i in range(1, max_hidden+1):
+    print("\n")
+    for j in range(1, max_neurons+1):
+        temp_hidden_vector[i-1] = j
+        nparams, nelements, not_warn = numberOfWeights(dataset,
+                                                       temp_hidden_vector)
+        if not not_warn:
+            print("Not viable anymore.")
+            break
+        hidden_vector[i-1] = j
+        print("Evaluating: ({i}, {j})".format(i=i, j=j), sep="\n")
+        mse["hidden"].append(i)
+        mse["neurons"].append(j)
+        mlp = mx.neuralNets.mlpRegressor(hidden_layers=hidden_vector)
+        mlp.train(dataset=dataset, alpha=0.01, epochs=_epochs)
+        mse["mse"].append(np.mean(mlp.test(dataset=dataset)["square_error"]))
+        # print(mse["mse"][-1])
+    if not not_warn:
+        break
+    temp = pd.DataFrame(mse)
+    min_mse_arg = temp.query("hidden == {}".format(i)).mse.argmin()
+    temp_hidden_vector[i-1] = temp["neurons"].iloc[min_mse_arg]
+    hidden_vector[i-1] = temp["neurons"].iloc[min_mse_arg]
+    best_per_layer.append(temp["mse"].iloc[min_mse_arg])
+    hidden_vector.append(None)
+    temp_hidden_vector.append(None)
+
+hidden_vector
+best_per_layer
+
+plt.plot(np.arange(len(best_per_layer))+1, best_per_layer)
+plt.show()
+
+mse_df = pd.DataFrame(mse)
+mse_df
+x = mse["hidden"]
+y = mse["neurons"]
+z = mse["mse"]
+min_z, max_z = min(z), max(z)
+z = [(i-min_z)/(max_z-min_z) for i in z]
+plt.scatter(x, y, c=z, s=100)
+# plt.gray()
+plt.xlabel("Number of hidden layers")
+plt.ylabel("Number of neurons at last hl")
+plt.grid()
+plt.show()
+
+plt.plot(x, mse["mse"])
+# plt.gray()
+plt.xlabel("Number of hidden layers")
+plt.ylabel("mse")
+plt.grid()
+plt.show()
+
+
+plt.plot(y, mse["mse"], '.b')
+# plt.gray()
+plt.xlabel("Number of neurons")
+plt.ylabel("mse")
+plt.grid()
+plt.show()
+
+# Create model
+
+_hdl = [10]
+numberOfWeights(dataset, _hdl, batch_ref=0.7)
 
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
 mlp.train(dataset=dataset, alpha=0.01, epochs=_epochs)
@@ -201,26 +293,16 @@ distribution.plot(x="x_data", y="density")
 plt.show()
 
 
-# Extract normalizer
-def normalizeExternalData(vector, dataset):
-    """."""
-    _min, _max = dataset.min_x, dataset.max_x
-    vector = np.asarray(vector)
-    return (vector-_min)/(_max-_min)
-
-
-def desnormalize(value, dataset):
-    """."""
-    _min, _max = dataset.min_y, dataset.max_y
-    value = (_max-_min)*value + _min
-    return np.asscalar(value)
-
-
 prices.values[-1]
+
 vector = list(prices.values[-nlags:]) + \
                     list(getReturns(prices.values[-(nlags+1):])) + \
                     one_hot(attrs=attrs, attr=getDistance(
-                                            prices.values[-nlags:], patterns2))
+                            getReturns(prices.values[-(nlags+1):]), patterns2))
+"""
+vector = list(prices.values[-nlags:]) + \
+                    list(getReturns(prices.values[-(nlags+1):])))
+"""
 vector = np.asarray(vector)
 vector = vector.reshape((vector.shape[0],))
 
@@ -236,17 +318,24 @@ def getForecastVector(base_estimation, kde, n):
                     for i in range(n)])
 
 
-forecast = getForecastVector(base_estimation, kde, 1000)
+forecast = getForecastVector(base_estimation, kde, 10000)
 mean_estimation = np.mean(forecast)
+mean_estimation
 pd.DataFrame({"forecast": forecast}).plot(kind="kde")
 plt.show()
+
+
 np.max(forecast)
 np.min(forecast)
 
+np.min(forecast) - np.asscalar(prices.values[-1])
+
 desnorm_train_y = np.array([desnormalize(i, dataset) for i in train.y])
-desnorm_trainestim_y = np.array([desnormalize(i, dataset) for i in train.estimates])
+desnorm_trainestim_y = np.array([desnormalize(i, dataset)
+                                 for i in train.estimates])
 desnorm_test_y = np.array([desnormalize(i, dataset) for i in test.y])
-desnorm_testestim_y = np.array([desnormalize(i, dataset) for i in test.estimates])
+desnorm_testestim_y = np.array([desnormalize(i, dataset)
+                                for i in test.estimates])
 
 np.sqrt(np.mean((desnorm_train_y - desnorm_trainestim_y)**2))
 np.sqrt(np.mean((desnorm_test_y - desnorm_testestim_y)**2))
