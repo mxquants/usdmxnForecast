@@ -126,19 +126,72 @@ def saveEstimate(estimate_log):
     pd.concat([forecast_log, temp]).to_pickle("forecast_log.pkl")
 
 
+def findLowerLimit(vector, alpha=0.05, step=0.0001):
+    """."""
+    _limit = np.min(vector)
+    n = len(vector)
+    while True:
+        _alpha = sum(vector < _limit) / n
+        if _alpha < alpha:
+            _limit += step
+            continue
+        return _limit, _alpha
+
+
+def findUpperLimit(vector, alpha=0.05, step=0.0001):
+    """."""
+    _limit = np.max(vector)
+    n = len(vector)
+    while True:
+        _alpha = sum(vector > _limit) / n
+        if _alpha < alpha:
+            _limit -= step
+            continue
+        return _limit, _alpha
+
+
+def getConfidenceInterval(vector, alpha, step=0.0001):
+    """."""
+    low, _ = findLowerLimit(vector, alpha, step)
+    up, _ = findUpperLimit(vector, alpha, step)
+    return low, up
+
+
 # Variables
 ndays = 1
 nlags = 5
 
 # Download prices
+# mx.data.()
+mx.data.getAvailableBanxicoSeries()
 df_complete = mx.data.getBanxicoSeries("usdmxn_fix")
+raw_interest_rate = mx.data.getBanxicoSeries("tiie28")
+
+interest_rate = numericDf(raw_interest_rate.copy())
 df = numericDf(df_complete.copy())
-df = cutDf(df, "01/01/2014")
+
+df = cutDf(df, "01/01/2016")
+interest_rate = cutDf(interest_rate, "01/01/2016")
+
 
 plt.plot(df["timestamp"], df["values"])
 plt.show()
 
+
+plt.plot(interest_rate["timestamp"], interest_rate["values"])
+plt.show()
+
+df.index = df.timestamp
+interest_rate.index = interest_rate.timestamp
+interest_rate = interest_rate.loc[df.index]
+
+
+interest_rate.shape
 df.shape
+
+interest_returns = interest_rate["values"].values[1:] - \
+                   interest_rate["values"].values[:-1]
+interest_returns = pd.DataFrame({"interest": interest_returns})
 
 rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
 rend_df = pd.DataFrame({"rends": rend})
@@ -179,9 +232,14 @@ pattern_df = detected_patterns.apply(lambda x: pd.Series(
                                                 one_hot(attrs=attrs, attr=x)))
 
 
+price_lags.shape
+rend_lags.shape
+pattern_df.shape
+interest_returns.shape
 # input / output
 output_data = prices.loc[nlags+ndays:]
-input_data = pd.concat([price_lags, rend_lags, pattern_df], axis=1)
+input_data = pd.concat([price_lags, rend_lags, pattern_df,
+                        interest_returns], axis=1).dropna()
 # input_data = pd.concat([price_lags, rend_lags], axis=1)
 
 input_data.shape
@@ -191,7 +249,7 @@ output_data.shape
 dataset = mx.dataHandler.Dataset(input_data, output_data, normalize="minmax")
 _epochs = 2000
 max_hidden = 5
-max_neurons = 30
+max_neurons = 20
 mse = {"hidden": [], "neurons": [], "mse": []}
 hidden_vector = [None]
 temp_hidden_vector = [None]
@@ -312,7 +370,7 @@ min_mse
 
 # Create model
 
-_hdl = []
+_hdl = [3]
 numberOfWeights(dataset, _hdl, batch_ref=0.7)
 
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
@@ -366,7 +424,7 @@ plt.show()
 error_data = test.errors.values
 np.mean(error_data)
 
-n_distribution, n_kde = generateKDE(error_data, bandwidth=0.005, _plot=False)
+n_distribution, n_kde = generateKDE(error_data, bandwidth=0.02, _plot=False)
 n_distribution.plot(x="x_data", y="density")
 plt.title("Error's kde distribution for test-data")
 plt.xlabel("Error")
@@ -415,7 +473,8 @@ plt.show()
 vector = list(prices.values[-nlags:]) + \
                     list(getReturns(prices.values[-(nlags+1):])) + \
                     one_hot(attrs=attrs, attr=getDistance(
-                            getReturns(prices.values[-(nlags+1):]), patterns2))
+                        getReturns(prices.values[-(nlags+1):]), patterns2)) + \
+                        [interest_returns.interest.values[-1]]
 """
 vector = list(prices.values[-nlags:]) + \
                     list(getReturns(prices.values[-(nlags+1):])))
@@ -440,6 +499,11 @@ min_forecast = np.min(forecast)
 max_forecast
 min_forecast
 
+increase_prob = sum(forecast < np.asscalar(prices.values[-1])) / len(forecast)
+confidence_level = 0.9
+alpha = (1-confidence_level)/2
+lower, upper = getConfidenceInterval(forecast, alpha)
+
 text_current = """\
 CURRENT INFO
 
@@ -459,14 +523,19 @@ Test's sqrt(MSE): $ {mse:0.4f} MXN
 Mean: $ {mean:0.6f} MXN
 Std: $ {std:0.4f} MXN
 
+Confidence level of: {cl:0.2f} %
 {min:0.6f} < x < {max:0.6f}
+
+prob(delta>0) = {increase:0.2f}
 """.format(
         mean=mean_estimation,
-        max=max_forecast,
-        min=min_forecast,
+        max=upper,
+        min=lower,
         std=std_estimation,
         mse=test_mxn_error,
-        base=base_estimation
+        base=base_estimation,
+        cl=100*confidence_level,
+        increase=100*increase_prob
 )
 
 
@@ -500,6 +569,7 @@ plt.text(0.5, 0.5,
          horizontalalignment='center')
 plt.axis('off')
 plt.show()
+
 
 # Pack forecast info
 
