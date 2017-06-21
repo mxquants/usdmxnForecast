@@ -96,6 +96,18 @@ def estimateVolatility(df_returns, reference_date, n_elem=21):
     return kde
 
 
+def analyticBlackScholes(_type, St, K, r, sigma, T, t):
+    """Black-Schole valuation."""
+    d1 = (np.log(St/K)+(r+sigma**2/2)*(T-t))/(sigma*np.sqrt(T-t))
+    d2 = d1-sigma*np.sqrt(T-t)
+    if _type == 'call':
+        return St*norm.cdf(d1)-K*np.exp(-r*(T-t))*norm.cdf(d2)
+    if _type == 'put':
+        return -St*norm.cdf(-d1)+K*np.exp(-r*(T-t))*norm.cdf(-d2)
+    print('Error: Type not found.')
+    return None
+
+
 # Download prices
 df_complete = mx.data.getBanxicoSeries("usdmxn_fix")
 df = numericDf(df_complete.copy())
@@ -150,11 +162,15 @@ plt.show()
 reference_date = dt.datetime.strptime("15/06/2017", "%d/%m/%Y")
 
 delta_list = {}
-k = 17.80
+k = 18.00
 T = n_elements
 r = 0.0699
 
-estimateVolatility(rend_df, reference_date, n_elem=5)
+option_value = analyticBlackScholes("call", last_price, k, r,
+                                    np.asscalar(kde_base_vols.sample(1)),
+                                    n_elements/360, 0)
+
+kde_base_vols = estimateVolatility(rend_df, reference_date, n_elem=5)
 for i in np.arange(n_elements)[::-1]+1:
     print(i)
     kde_vol = estimateVolatility(rend_df, reference_date, n_elem=int(i))
@@ -180,17 +196,32 @@ PL = pd.DataFrame(PL, index=np.arange(len(PL[0]))+1)
 new_line = {0:df_trajectories.iloc[0, :].values * df_delta.iloc[0, :].values}
 new_line = pd.DataFrame(new_line).T
 
-PL = pd.concat([new_line, PL], 0)
+n_end = len(df_trajectories)-1
+end_line = {n_end: -df_trajectories.iloc[-1, :].values *
+            df_delta.iloc[-1, :].values}
+end_line = pd.DataFrame(end_line).T
 
+PL = pd.concat([new_line, PL, end_line], 0)
 
+PL
 
 
 profit = PL.sum().values
 
+options_wins = [(i if i > 0 else 0)
+                for i in df_trajectories.iloc[-1, :].values - k]
+options_wins = np.array(options_wins)
 
-plt.plot(profit)
-plt.show()
+np.mean(options_wins)
+np.mean(profit)
 
+profs = profit + options_wins - option_value
+np.mean(profs)
+np.min(profs)
+np.max(profs)
 
-pd.DataFrame(profit).plot(kind="kde")
+# win probability
+sum(profs > 0)/len(profs)
+
+pd.DataFrame(profit+options_wins-option_value).plot(kind="kde")
 plt.show()
