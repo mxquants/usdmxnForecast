@@ -335,7 +335,7 @@ pattern_df = detected_patterns.apply(lambda x: pd.Series(
 prices.shape
 price_lags.shape
 rend_lags.shape
-pattern_df.shape
+# pattern_df.shape
 interest_returns.shape
 lowhigh.shape
 volatility_df.shape
@@ -479,7 +479,7 @@ min_mse
 
 # Create model
 
-_hdl = [7]
+_hdl = [9]
 numberOfWeights(dataset, _hdl, batch_ref=0.7)
 
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
