@@ -157,50 +157,151 @@ def getConfidenceInterval(vector, alpha, step=0.0001):
     return low, up
 
 
+def getVolatilityVect(vect, window):
+    """Get the vol. vect."""
+    vect = [i**2 for i in vect]
+    n = len(vect)
+    vol = []
+    for i in range(n-window):
+        vol.append(np.sqrt(252*np.mean(vect[i:(i+window)])))
+    return vol
+
+
+def findBestWindow(vect, reference_vect):
+    """Find best volatility window."""
+    _from = 5
+    _to = 150
+    correlation = []
+    for i in np.arange(_from, _to+1):
+        temp = getVolatilityVect(vect, i)
+        n = len(temp)
+        adequate_ref = reference_vect[i:(i+n)]
+        correlation.append(np.corrcoef(temp, adequate_ref)[0, 1])
+    return np.argmax(correlation)+_from
+
+
+def movingAverage(vector, m):
+    """Moving average."""
+    n = len(vector)
+    a = []
+    for i in range(n-m):
+        a.append(np.mean(vector[i:(i+m)]))
+    return a
+
+
 # Variables
 ndays = 1
 nlags = 5
+nlow = 20
+nhigh = 40
+nvol = 86
 
-# Download prices
-# mx.data.()
-mx.data.getAvailableBanxicoSeries()
+# Download raw data
 df_complete = mx.data.getBanxicoSeries("usdmxn_fix")
 raw_interest_rate = mx.data.getBanxicoSeries("tiie28")
+raw_high = mx.data.getBanxicoSeries("usdmxn_max")
+raw_low = mx.data.getBanxicoSeries("usdmxn_min")
 
+# str -> numeric
 interest_rate = numericDf(raw_interest_rate.copy())
 df = numericDf(df_complete.copy())
+_high = numericDf(raw_high.copy())
+_low = numericDf(raw_low.copy())
 
-df = cutDf(df, "01/01/2016")
-interest_rate = cutDf(interest_rate, "01/01/2016")
+# query for date
+reference_string_date = "01/01/2016"
+df = cutDf(df, reference_string_date)
+interest_rate = cutDf(interest_rate, reference_string_date)
+_high = cutDf(_high, reference_string_date)
+_low = cutDf(_low, reference_string_date)
 
-
+# Plot prices
 plt.plot(df["timestamp"], df["values"])
 plt.show()
 
-
+# Plot Interest Rate
 plt.plot(interest_rate["timestamp"], interest_rate["values"])
 plt.show()
 
+# Timestamp as index
 df.index = df.timestamp
+_high.index = _high.timestamp
+_low.index = _low.timestamp
 interest_rate.index = interest_rate.timestamp
-interest_rate = interest_rate.loc[df.index]
 
+# Check if index between prices and interest rate are the same
+ref_index = df.index
+interest_rate = interest_rate.loc[ref_index]
+_high = _high.loc[ref_index]
+_low = _low.loc[ref_index]
 
 interest_rate.shape
 df.shape
+_high.shape
+_low.shape
 
+# Calculate returns for interest rate
 interest_returns = interest_rate["values"].values[1:] - \
                    interest_rate["values"].values[:-1]
 interest_returns = pd.DataFrame({"interest": interest_returns})
 
+# Calculate returns for prices
 rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
 rend_df = pd.DataFrame({"rends": rend})
 rend_df.shape
+
+# Prices as a dataframe (without first price)
 prices = df[["values"]].iloc[1:]
 
-prices.index = np.arange(1, len(prices)+1)
-rend_df.index = prices.index
+# Volatility feature
+nvol = findBestWindow(rend, prices["values"].values)
+vols = getVolatilityVect(rend, nvol)
+volatility_df = pd.DataFrame({"vols": vols})
+len(vols)
+
+# Moving averages
+ma_low = movingAverage(_low["values"].values, nlow)
+ma_high = movingAverage(_high["values"].values, nhigh)
+
+trash0, trash1 = (0 if nlow > nhigh else nhigh-nlow), \
+                 (0 if nlow < nhigh else nlow-nhigh)
+
+moving_average = pd.DataFrame({"low": ma_low[trash0:],
+                               "high": ma_high[trash1:]})
+
+lowhigh = pd.DataFrame({"vals": moving_average.apply(
+                                    lambda x: x["low"]-x["high"], 1).values})
+lowhigh.plot()
+plt.show()
+
+# Adjust dataframes
+max_cut = max([nvol, nlow, nhigh])
+cut_lowhigh = max_cut - max([nlow, nhigh])
+cut_vol = max_cut - nvol
+
+prices = prices.iloc[max_cut:]
+rend_df = rend_df.iloc[max_cut:]
+interest_returns = interest_returns.iloc[max_cut:]
+lowhigh = lowhigh.iloc[cut_lowhigh+1:]
+volatility_df = volatility_df.iloc[cut_vol:]
+
+prices.shape
+rend_df.shape
+interest_returns.shape
+lowhigh.shape
+volatility_df.shape
+
+# Change index to numeric
+numeric_index = np.arange(1, len(prices)+1)
+prices.index = numeric_index
+rend_df.index = numeric_index
+interest_returns.index = numeric_index
+lowhigh.index = numeric_index
+volatility_df.index = numeric_index
+
+# Last price
 prices.iloc[-1]
+
 
 # Create lags
 price_lags = lagMatrix(prices.iloc[:-ndays], lag=nlags)
@@ -231,16 +332,24 @@ attrs = np.unique(detected_patterns)
 pattern_df = detected_patterns.apply(lambda x: pd.Series(
                                                 one_hot(attrs=attrs, attr=x)))
 
-
+prices.shape
 price_lags.shape
 rend_lags.shape
 pattern_df.shape
 interest_returns.shape
+lowhigh.shape
+volatility_df.shape
+
 # input / output
-output_data = prices.loc[nlags+ndays:]
+output_data = prices.loc[nlags+ndays+1:]
+"""
 input_data = pd.concat([price_lags, rend_lags, pattern_df,
-                        interest_returns], axis=1).dropna()
-# input_data = pd.concat([price_lags, rend_lags], axis=1)
+                        interest_returns, lowhigh,
+                        volatility_df], axis=1).dropna()
+"""
+input_data = pd.concat([price_lags, rend_lags,
+                        interest_returns, lowhigh,
+                        volatility_df], axis=1).dropna()
 
 input_data.shape
 output_data.shape
@@ -370,7 +479,7 @@ min_mse
 
 # Create model
 
-_hdl = [3]
+_hdl = [7]
 numberOfWeights(dataset, _hdl, batch_ref=0.7)
 
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
@@ -470,15 +579,23 @@ plt.legend()
 plt.show()
 
 # Forecast
+"""
 vector = list(prices.values[-nlags:]) + \
                     list(getReturns(prices.values[-(nlags+1):])) + \
                     one_hot(attrs=attrs, attr=getDistance(
                         getReturns(prices.values[-(nlags+1):]), patterns2)) + \
-                        [interest_returns.interest.values[-1]]
+                    [interest_returns.interest.values[-1]] + \
+                    [lowhigh.vals.values[-1]] + \
+                    [volatility_df.vols.values[-1]]
+
+
 """
 vector = list(prices.values[-nlags:]) + \
-                    list(getReturns(prices.values[-(nlags+1):])))
-"""
+                    list(getReturns(prices.values[-(nlags+1):])) + \
+                    [interest_returns.interest.values[-1]] + \
+                    [lowhigh.vals.values[-1]] + \
+                    [volatility_df.vols.values[-1]]
+
 vector = np.asarray(vector)
 vector = vector.reshape((vector.shape[0],))
 
@@ -499,8 +616,8 @@ min_forecast = np.min(forecast)
 max_forecast
 min_forecast
 
-increase_prob = sum(forecast < np.asscalar(prices.values[-1])) / len(forecast)
-confidence_level = 0.9
+increase_prob = sum(forecast > np.asscalar(prices.values[-1])) / len(forecast)
+confidence_level = 0.75
 alpha = (1-confidence_level)/2
 lower, upper = getConfidenceInterval(forecast, alpha)
 
