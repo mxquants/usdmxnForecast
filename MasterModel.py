@@ -12,7 +12,8 @@ import pandas as pd
 import quanta as mx
 import datetime as dt
 import matplotlib.pyplot as plt
-
+from scipy.stats.mstats import normaltest
+from scipy import stats
 
 def lagMatrix(df, lag=5):
     """Return lag matrix for a given time series (dataframe)."""
@@ -189,6 +190,50 @@ def movingAverage(vector, m):
     return a
 
 
+def FAC(vector, k):
+    """Autocorrelation function."""
+    vector_k = vector[:-k] if k != 0 else vector
+    vector = vector[k:]
+    covariance = np.cov(vector, vector_k)
+    return covariance[0, 1] / covariance[0, 0]
+
+
+def FACP(vector, k):
+    """Partial autocorrelation function."""
+    if k == 0:
+        return 1
+    matrix = np.matlib.ones((k, k))
+    for i in range(k-1):
+        rvector = np.asarray([FAC(vector, j) for j in range(1, k-i)])
+        matrix[i, i+1:k] = rvector.reshape((1, k-i-1))
+        matrix[i+1:k, i] = rvector.reshape((k-i-1, 1))
+    return np.asscalar(np.linalg.inv(matrix).dot(np.array(
+                [FAC(vector, i) for i in range(1, k+1)]).reshape((k, 1)))[-1])
+
+
+
+a = np.matlib.ones((5,5))
+a[:, 1] = np.array([0,0,0,0,0]).reshape((5,1))
+a[1:, 1] = np.array([3,2,2,2]).reshape((4,1))
+
+
+plt.plot([FACP(rend, i) for i in range(20)], ".")
+plt.show()
+
+plt.plot([FACP(df["values"].values - np.mean(df["values"].values), i)
+          for i in range(20)], ".")
+plt.show()
+
+
+
+np.asscalar(a[-1])
+np.linalg.inv(a)
+a
+
+FAC(rend, 4)
+rend[:-0]
+np.var(rend)
+
 # Variables
 ndays = 1
 nlags = 5
@@ -245,10 +290,14 @@ interest_returns = interest_rate["values"].values[1:] - \
                    interest_rate["values"].values[:-1]
 interest_returns = pd.DataFrame({"interest": interest_returns})
 
+stats.shapiro(interest_returns.interest.values) # not normal when 2nd < 0.05
+
 # Calculate returns for prices
 rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
 rend_df = pd.DataFrame({"rends": rend})
 rend_df.shape
+
+stats.shapiro(rend) # not normal when 2nd < 0.05
 
 # Prices as a dataframe (without first price)
 prices = df[["values"]].iloc[1:]
@@ -479,7 +528,7 @@ min_mse
 
 # Create model
 
-_hdl = [9]
+_hdl = [5]
 numberOfWeights(dataset, _hdl, batch_ref=0.7)
 
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
@@ -510,6 +559,21 @@ train.errors.plot(kind="kde")
 test.errors.plot(kind="kde")
 plt.show()
 
+# normaltest(np.random.normal(0,1,1000))
+# stats.shapiro(np.random.normal(0,1,1000)) # is not normal if 2nd < 0.05
+
+train.errors.plot()
+plt.show()
+
+normaltest(train.errors.values)
+stats.shapiro(train.errors.values)
+
+
+test.errors.plot()
+plt.show()
+
+normaltest(test.errors.values)
+stats.shapiro(test.errors[test.errors.values < 0.2].values)
 
 fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 6))
 plt.subplot(121)
@@ -560,6 +624,7 @@ distribution.plot(x="x_data", y="density")
 plt.title("Error's kde distribution for test-data")
 plt.xlabel("Error")
 plt.show()
+
 
 fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 6))
 plt.subplot(121)
@@ -709,3 +774,13 @@ estimates_log = {
                  "max_val": max_val,
                  "delta": delta}
 # saveEstimate(estimates_log)
+
+same_vals_error = prices.values[1:] - prices.values[:-1]
+np.sqrt(np.mean(list(map(lambda x: x**2, same_vals_error))))
+np.mean(same_vals_error)
+np.std(same_vals_error)
+
+pd.DataFrame(same_vals_error).plot(kind="kde")
+plt.show()
+
+stats.shapiro(same_vals_error)
