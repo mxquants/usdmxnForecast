@@ -14,6 +14,8 @@ import datetime as dt
 import matplotlib.pyplot as plt
 from scipy.stats.mstats import normaltest
 from scipy import stats
+import sys
+
 
 def lagMatrix(df, lag=5):
     """Return lag matrix for a given time series (dataframe)."""
@@ -171,7 +173,7 @@ def getVolatilityVect(vect, window):
 def findBestWindow(vect, reference_vect):
     """Find best volatility window."""
     _from = 5
-    _to = 150
+    _to = 20
     correlation = []
     for i in np.arange(_from, _to+1):
         temp = getVolatilityVect(vect, i)
@@ -211,326 +213,208 @@ def FACP(vector, k):
                 [FAC(vector, i) for i in range(1, k+1)]).reshape((k, 1)))[-1])
 
 
+def downloadData():
+    """Download relevant data for the model."""
+    # Download raw data
+    df_complete = mx.data.getBanxicoSeries("usdmxn_fix")
+    raw_interest_rate = mx.data.getBanxicoSeries("tiie28")
+    raw_high = mx.data.getBanxicoSeries("usdmxn_max")
+    raw_low = mx.data.getBanxicoSeries("usdmxn_min")
 
-a = np.matlib.ones((5,5))
-a[:, 1] = np.array([0,0,0,0,0]).reshape((5,1))
-a[1:, 1] = np.array([3,2,2,2]).reshape((4,1))
+    # str -> numeric
+    interest_rate = numericDf(raw_interest_rate.copy())
+    df = numericDf(df_complete.copy())
+    _high = numericDf(raw_high.copy())
+    _low = numericDf(raw_low.copy())
+
+    # query for date
+    reference_string_date = "01/01/2017"
+    df = cutDf(df, reference_string_date)
+    interest_rate = cutDf(interest_rate, reference_string_date)
+    _high = cutDf(_high, reference_string_date)
+    _low = cutDf(_low, reference_string_date)
+
+    # Timestamp as index
+    df.index = df.timestamp
+    _high.index = _high.timestamp
+    _low.index = _low.timestamp
+    interest_rate.index = interest_rate.timestamp
+
+    # Check if index between prices and interest rate are the same
+    ref_index = df.index
+    interest_rate = interest_rate.loc[ref_index]
+    _high = _high.loc[ref_index]
+    _low = _low.loc[ref_index]
+
+    return df, interest_rate, _high, _low
 
 
+def getInputOutput(data, ndays=1, nlags=5, nlow=20, nhigh=40):
+    """."""
+    df, interest_rate, _high, _low = data
+    normality_test = {}  # not normal when 2nd < 0.05
+
+    # Calculate returns for interest rate
+    interest_returns = interest_rate["values"].values[1:] - \
+        interest_rate["values"].values[:-1]
+    interest_returns = pd.DataFrame({"interest": interest_returns})
+
+    normality_test["interest_returns"] = stats.shapiro(
+                                            interest_returns.interest.values)
+
+    # Calculate returns for prices
+    rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
+    rend_df = pd.DataFrame({"rends": rend})
+    rend_df.shape
+
+    normality_test["rend"] = stats.shapiro(rend)
+
+    # Prices as a dataframe (without first price)
+    prices = df[["values"]].iloc[1:]
+
+    # Volatility feature
+    nvol = findBestWindow(rend, prices["values"].values)
+    vols = getVolatilityVect(rend, nvol)
+    volatility_df = pd.DataFrame({"vols": vols})
+
+    # Moving averages
+    ma_low = movingAverage(_low["values"].values, nlow)
+    ma_high = movingAverage(_high["values"].values, nhigh)
+
+    trash0, trash1 = (0 if nlow > nhigh else nhigh-nlow), \
+                     (0 if nlow < nhigh else nlow-nhigh)
+
+    moving_average = pd.DataFrame({"low": ma_low[trash0:],
+                                   "high": ma_high[trash1:]})
+
+    lowhigh = pd.DataFrame({"vals": moving_average.apply(
+                                        lambda x: x["low"]-x["high"],
+                                        1).values})
+
+    # Adjust dataframes
+    max_cut = max([nvol, nlow, nhigh])
+    cut_lowhigh = max_cut - max([nlow, nhigh])
+    cut_vol = max_cut - nvol
+
+    prices = prices.iloc[max_cut:]
+    rend_df = rend_df.iloc[max_cut:]
+    interest_returns = interest_returns.iloc[max_cut:]
+    lowhigh = lowhigh.iloc[cut_lowhigh+1:]
+    volatility_df = volatility_df.iloc[cut_vol:]
+
+    # Change index to numeric
+    numeric_index = np.arange(1, len(prices)+1)
+    prices.index = numeric_index
+    rend_df.index = numeric_index
+    interest_returns.index = numeric_index
+    lowhigh.index = numeric_index
+    volatility_df.index = numeric_index
+
+    # Create lags
+    price_lags = lagMatrix(prices.iloc[:-ndays], lag=nlags)
+    rend_lags = lagMatrix(rend_df.iloc[:-ndays], lag=nlags)
+    rend_lags.columns = [str(i)+"r" for i in rend_lags.columns]
+    price_lags.columns = [str(i)+"p" for i in price_lags.columns]
+
+    # input / output
+    output_data = prices.loc[nlags+ndays+1:]
+    """
+    input_data = pd.concat([price_lags, rend_lags, pattern_df,
+                            interest_returns, lowhigh,
+                            volatility_df], axis=1).dropna()
+    """
+    input_data = pd.concat([price_lags, rend_lags,
+                            interest_returns, lowhigh,
+                            volatility_df], axis=1).dropna()
+
+    vector = list(prices.values[-nlags:]) + \
+        list(getReturns(prices.values[-(nlags+1):])) + \
+        [interest_returns.interest.values[-1]] + \
+        [lowhigh.vals.values[-1]] + \
+        [volatility_df.vols.values[-1]]
+
+    vector = np.asarray(vector)
+    vector = vector.reshape((vector.shape[0],))
+
+    variables = {}
+    variables["interest_returns"] = interest_returns
+    variables["rend_df"] = rend_df
+    variables["prices"] = prices
+    variables["lowhigh"] = lowhigh
+    variables["volatility_df"] = volatility_df
+    variables["price_lags"] = price_lags
+    variables["rend_lags"] = rend_lags
+
+    return input_data, output_data, vector, variables, normality_test
+
+
+def getHiddenCombinations(max_hidden, max_neurons, count=0):
+    """Return all possible combinations for hidden layers in a MLP."""
+    if count == max_neurons ** max_hidden:
+        return []
+    return [[(lambda i:
+             int((count % max_neurons**(i+1)) / max_neurons**i) + 1)(i)
+            for i in range(max_hidden)]] + getHiddenCombinations(max_hidden,
+                                                                 max_neurons,
+                                                                 count=count+1)
+
+
+def findBestArchitecture(dataset, max_hidden=5, max_neurons=5):
+    """."""
+    sys.setrecursionlimit(10000)
+    possible_architectures = {}
+    mse = {}
+    best_hdl = None
+    best2_hdl = None
+    min_mse = float("inf")
+    min2_mse = float("inf")
+    for i in range(max_hidden):
+        possible_architectures[i] = getHiddenCombinations(i, max_neurons)
+        for _hdl in possible_architectures[i]:
+            if not numberOfWeights(dataset, _hdl, batch_ref=0.7)[2]:
+                continue
+            else:
+                mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
+                mlp.train(dataset=dataset, alpha=0.01, epochs=2000)
+                test = pd.DataFrame(mlp.test(dataset=dataset))
+                this_mse = mlp.test(dataset=dataset)["square_error"][-1]
+                mse[str(_hdl)] = this_mse
+                if this_mse < min_mse:
+                    min_mse = this_mse
+                    best_hdl = _hdl
+                if this_mse > min_mse and this_mse < min2_mse:
+                    min2_mse = this_mse
+                    best2_hdl = _hdl
+
+    return mse, min_mse, min2_mse, best_hdl, best2_hdl
+
+df, interest_rate, _high, _low = downloadData()
+
+rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
 plt.plot([FACP(rend, i) for i in range(20)], ".")
 plt.show()
-
 plt.plot([FACP(df["values"].values - np.mean(df["values"].values), i)
           for i in range(20)], ".")
 plt.show()
 
+input_data, output_data, vector, variables, normality_test = getInputOutput(
+        (df, interest_rate, _high, _low), ndays=1, nlags=1, nlow=10, nhigh=20)
 
 
-np.asscalar(a[-1])
-np.linalg.inv(a)
-a
-
-FAC(rend, 4)
-rend[:-0]
-np.var(rend)
-
-# Variables
-ndays = 1
-nlags = 5
-nlow = 20
-nhigh = 40
-nvol = 86
-
-# Download raw data
-df_complete = mx.data.getBanxicoSeries("usdmxn_fix")
-raw_interest_rate = mx.data.getBanxicoSeries("tiie28")
-raw_high = mx.data.getBanxicoSeries("usdmxn_max")
-raw_low = mx.data.getBanxicoSeries("usdmxn_min")
-
-# str -> numeric
-interest_rate = numericDf(raw_interest_rate.copy())
-df = numericDf(df_complete.copy())
-_high = numericDf(raw_high.copy())
-_low = numericDf(raw_low.copy())
-
-# query for date
-reference_string_date = "01/01/2016"
-df = cutDf(df, reference_string_date)
-interest_rate = cutDf(interest_rate, reference_string_date)
-_high = cutDf(_high, reference_string_date)
-_low = cutDf(_low, reference_string_date)
-
-# Plot prices
-plt.plot(df["timestamp"], df["values"])
-plt.show()
-
-# Plot Interest Rate
-plt.plot(interest_rate["timestamp"], interest_rate["values"])
-plt.show()
-
-# Timestamp as index
-df.index = df.timestamp
-_high.index = _high.timestamp
-_low.index = _low.timestamp
-interest_rate.index = interest_rate.timestamp
-
-# Check if index between prices and interest rate are the same
-ref_index = df.index
-interest_rate = interest_rate.loc[ref_index]
-_high = _high.loc[ref_index]
-_low = _low.loc[ref_index]
-
-interest_rate.shape
-df.shape
-_high.shape
-_low.shape
-
-# Calculate returns for interest rate
-interest_returns = interest_rate["values"].values[1:] - \
-                   interest_rate["values"].values[:-1]
-interest_returns = pd.DataFrame({"interest": interest_returns})
-
-stats.shapiro(interest_returns.interest.values) # not normal when 2nd < 0.05
-
-# Calculate returns for prices
-rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
-rend_df = pd.DataFrame({"rends": rend})
-rend_df.shape
-
-stats.shapiro(rend) # not normal when 2nd < 0.05
-
-# Prices as a dataframe (without first price)
-prices = df[["values"]].iloc[1:]
-
-# Volatility feature
-nvol = findBestWindow(rend, prices["values"].values)
-vols = getVolatilityVect(rend, nvol)
-volatility_df = pd.DataFrame({"vols": vols})
-len(vols)
-
-# Moving averages
-ma_low = movingAverage(_low["values"].values, nlow)
-ma_high = movingAverage(_high["values"].values, nhigh)
-
-trash0, trash1 = (0 if nlow > nhigh else nhigh-nlow), \
-                 (0 if nlow < nhigh else nlow-nhigh)
-
-moving_average = pd.DataFrame({"low": ma_low[trash0:],
-                               "high": ma_high[trash1:]})
-
-lowhigh = pd.DataFrame({"vals": moving_average.apply(
-                                    lambda x: x["low"]-x["high"], 1).values})
-lowhigh.plot()
-plt.show()
-
-# Adjust dataframes
-max_cut = max([nvol, nlow, nhigh])
-cut_lowhigh = max_cut - max([nlow, nhigh])
-cut_vol = max_cut - nvol
-
-prices = prices.iloc[max_cut:]
-rend_df = rend_df.iloc[max_cut:]
-interest_returns = interest_returns.iloc[max_cut:]
-lowhigh = lowhigh.iloc[cut_lowhigh+1:]
-volatility_df = volatility_df.iloc[cut_vol:]
-
-prices.shape
-rend_df.shape
-interest_returns.shape
-lowhigh.shape
-volatility_df.shape
-
-# Change index to numeric
-numeric_index = np.arange(1, len(prices)+1)
-prices.index = numeric_index
-rend_df.index = numeric_index
-interest_returns.index = numeric_index
-lowhigh.index = numeric_index
-volatility_df.index = numeric_index
-
-# Last price
-prices.iloc[-1]
-
-
-# Create lags
-price_lags = lagMatrix(prices.iloc[:-ndays], lag=nlags)
-rend_lags = lagMatrix(rend_df.iloc[:-ndays], lag=nlags)
-rend_lags.columns = [str(i)+"r" for i in rend_lags.columns]
-price_lags.columns = [str(i)+"p" for i in price_lags.columns]
-
-# Pattern matrix
-patterns1 = pd.read_pickle("competitive_neurons.pkl")
-patterns2 = pd.read_pickle("kmeans.pkl")
-
-detected_patterns = rend_lags.apply(lambda x: getDistance(x,
-                                                          patterns=patterns2),
-                                    1)
-np.unique(detected_patterns)
-plt.hist(detected_patterns)
-plt.show()
-
-patterns_hist = {}
-for i in detected_patterns:
-    if i not in patterns_hist:
-        patterns_hist[i] = 1
-    else:
-        patterns_hist[i] += 1
-patterns_hist
-
-attrs = np.unique(detected_patterns)
-pattern_df = detected_patterns.apply(lambda x: pd.Series(
-                                                one_hot(attrs=attrs, attr=x)))
-
-prices.shape
-price_lags.shape
-rend_lags.shape
-# pattern_df.shape
-interest_returns.shape
-lowhigh.shape
-volatility_df.shape
-
-# input / output
-output_data = prices.loc[nlags+ndays+1:]
-"""
-input_data = pd.concat([price_lags, rend_lags, pattern_df,
-                        interest_returns, lowhigh,
-                        volatility_df], axis=1).dropna()
-"""
-input_data = pd.concat([price_lags, rend_lags,
-                        interest_returns, lowhigh,
-                        volatility_df], axis=1).dropna()
-
-input_data.shape
-output_data.shape
-
-# Explore model configuration
 dataset = mx.dataHandler.Dataset(input_data, output_data, normalize="minmax")
-_epochs = 2000
-max_hidden = 5
-max_neurons = 20
-mse = {"hidden": [], "neurons": [], "mse": []}
-hidden_vector = [None]
-temp_hidden_vector = [None]
-best_per_layer = []
-for i in range(1, max_hidden+1):
-    print("\n")
-    for j in range(1, max_neurons+1):
-        temp_hidden_vector[i-1] = j
-        nparams, nelements, not_warn = numberOfWeights(dataset,
-                                                       temp_hidden_vector)
-        if not not_warn:
-            print("Not viable anymore.")
-            break
-        hidden_vector[i-1] = j
-        mse["hidden"].append(i)
-        mse["neurons"].append(j)
-        mlp = mx.neuralNets.mlpRegressor(hidden_layers=hidden_vector)
-        mlp.train(dataset=dataset, alpha=0.01, epochs=_epochs)
-        mse["mse"].append(np.mean(mlp.test(dataset=dataset)["square_error"]))
-        print("Evaluating: ({i},{j}) => {mse:0.6f}".format(i=i, j=j,
-                                                           mse=mse["mse"][-1]))
-    if not not_warn:
-        break
-    temp = pd.DataFrame(mse)
-    min_mse_arg = temp.query("hidden == {}".format(i)).mse.argmin()
-    temp_hidden_vector[i-1] = temp["neurons"].iloc[min_mse_arg]
-    hidden_vector[i-1] = temp["neurons"].iloc[min_mse_arg]
-    best_per_layer.append(temp["mse"].iloc[min_mse_arg])
-    hidden_vector.append(None)
-    temp_hidden_vector.append(None)
+mse, min_mse, min2_mse, best_hdl, best2_hdl = findBestArchitecture(dataset,
+                                                                  max_hidden=5,
+                                                                  max_neurons=5)
 
-hidden_vector
-best_per_layer
-
-plt.plot(np.arange(len(best_per_layer))+1, best_per_layer)
-plt.title("MSE best per n-neurons per hidden layer index")
-plt.show()
-
-mse_df = pd.DataFrame(mse)
-mse_df
-x = mse["hidden"]
-y = mse["neurons"]
-z = mse["mse"]
-min_z, max_z = min(z), max(z)
-z = [(i-min_z)/(max_z-min_z) for i in z]
-plt.scatter(x, y, c=z, s=100)
-# plt.gray()
-plt.xlabel("Number of hidden layers")
-plt.ylabel("Number of neurons at last hl")
-plt.grid()
-plt.show()
-
-plt.plot(x, mse["mse"])
-# plt.gray()
-plt.xlabel("Number of hidden layers")
-plt.ylabel("mse")
-plt.grid()
-plt.show()
-
-
-plt.plot(y, mse["mse"], '.b')
-# plt.gray()
-plt.xlabel("Number of neurons")
-plt.ylabel("mse")
-plt.grid()
-plt.show()
-
-# Grid eval
-grid = [np.arange(1, max_neurons) for i in range(1, max_hidden)]
-grid = pd.DataFrame(grid).T
-
-
-def getMSE(architecture, dataset):
-    """Return MSE or inf."""
-    nparams, nelements, not_warn = numberOfWeights(dataset, architecture)
-    if not not_warn:
-        return np.float("inf")
-    mlp = mx.neuralNets.mlpRegressor(hidden_layers=architecture)
-    mlp.train(dataset=dataset, alpha=0.01, epochs=_epochs)
-    return np.mean(mlp.test(dataset=dataset)["square_error"])
-
-
-mse_res = {}
-save_min = float("inf")
-save_architecture = None
-for i in grid:
-    hidden = i
-    mse_res[hidden] = []
-    for j in grid[hidden].values:
-
-        architecture = [j]*hidden
-        temp_mse = getMSE(architecture, dataset)
-        if temp_mse < save_min:
-            save_min = temp_mse
-            save_architecture = architecture
-        mse_res[hidden].append(temp_mse)
-        print("({}, {}) => {}".format(hidden, j, mse))
-
-mse_vals = pd.DataFrame(mse_res, index=grid[hidden].values)
-mse_vals
-
-
-min_arg, min_mse = None, float("inf")
-for col in mse_vals:
-    local_min = mse_vals[col].min()
-    local_argmin = mse_vals[col].argmin()
-    if local_min < min_mse:
-        min_mse = local_min
-        min_arg = local_argmin
-        best_architecture = (col, min_arg)
-    mse_vals[col].plot()
-    plt.title("Fix number of hidden layers: {}".format(col))
-    plt.xlabel("Number of neurons (for each layer)")
-    plt.show()
-
-best_architecture
+best_hdl
+best2_hdl
 min_mse
+min2_mse
 
 # Create model
 
-_hdl = [5]
-numberOfWeights(dataset, _hdl, batch_ref=0.7)
-
+_hdl = best_hdl
+_epochs  = 2000
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
 mlp.train(dataset=dataset, alpha=0.01, epochs=_epochs)
 train = mlp.train_results
@@ -540,12 +424,6 @@ test = pd.DataFrame(mlp.test(dataset=dataset))
 # mse
 mlp.test(dataset=dataset)["square_error"][-1]
 
-# estimate
-y_estimate = mlp.freeEval(dataset.norm_input_data.values)
-plt.plot(dataset.norm_input_data[0].values,
-         [np.asscalar(i) for i in dataset.norm_output_data.values], "b.")
-plt.plot(dataset.norm_input_data[0].values, y_estimate, "r.")
-plt.show()
 
 # visualize the training performance
 plt.plot(np.arange(_epochs), mlp.epoch_error)
@@ -565,14 +443,12 @@ plt.show()
 train.errors.plot()
 plt.show()
 
-normaltest(train.errors.values)
 stats.shapiro(train.errors.values)
 
 
 test.errors.plot()
 plt.show()
 
-normaltest(test.errors.values)
 stats.shapiro(test.errors[test.errors.values < 0.2].values)
 
 fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 6))
@@ -598,10 +474,6 @@ error_data = test.errors.values
 np.mean(error_data)
 
 n_distribution, n_kde = generateKDE(error_data, bandwidth=0.02, _plot=False)
-n_distribution.plot(x="x_data", y="density")
-plt.title("Error's kde distribution for test-data")
-plt.xlabel("Error")
-plt.show()
 
 
 # Error in MXN
@@ -644,29 +516,8 @@ plt.legend()
 plt.show()
 
 # Forecast
-"""
-vector = list(prices.values[-nlags:]) + \
-                    list(getReturns(prices.values[-(nlags+1):])) + \
-                    one_hot(attrs=attrs, attr=getDistance(
-                        getReturns(prices.values[-(nlags+1):]), patterns2)) + \
-                    [interest_returns.interest.values[-1]] + \
-                    [lowhigh.vals.values[-1]] + \
-                    [volatility_df.vols.values[-1]]
-
-
-"""
-vector = list(prices.values[-nlags:]) + \
-                    list(getReturns(prices.values[-(nlags+1):])) + \
-                    [interest_returns.interest.values[-1]] + \
-                    [lowhigh.vals.values[-1]] + \
-                    [volatility_df.vols.values[-1]]
-
-vector = np.asarray(vector)
-vector = vector.reshape((vector.shape[0],))
-
-
-vector = normalizeExternalData(vector, dataset)
-raw_base_estimation = mlp.freeEval(pd.DataFrame({"vect": vector}).T.values)
+vector2 = normalizeExternalData(vector, dataset)
+raw_base_estimation = mlp.freeEval(pd.DataFrame({"vect": vector2}).T.values)
 base_estimation = desnormalize(raw_base_estimation, dataset)
 base_estimation
 
@@ -681,6 +532,7 @@ min_forecast = np.min(forecast)
 max_forecast
 min_forecast
 
+prices = variables["prices"]
 increase_prob = sum(forecast > np.asscalar(prices.values[-1])) / len(forecast)
 confidence_level = 0.75
 alpha = (1-confidence_level)/2
