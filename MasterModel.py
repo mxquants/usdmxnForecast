@@ -413,7 +413,7 @@ min2_mse
 
 # Create model
 
-_hdl = best_hdl
+_hdl = []  # best_hdl
 _epochs  = 2000
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
 mlp.train(dataset=dataset, alpha=0.01, epochs=_epochs)
