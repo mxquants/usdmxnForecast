@@ -197,7 +197,7 @@ def FAC(vector, k):
     vector_k = vector[:-k] if k != 0 else vector
     vector = vector[k:]
     covariance = np.cov(vector, vector_k)
-    return covariance[0, 1] / covariance[0, 0]
+    return covariance[0, 1] / (np.sqrt(covariance[0, 0])*np.sqrt(covariance[1, 1]))
 
 
 def FACP(vector, k):
@@ -274,6 +274,7 @@ def getInputOutput(data, ndays=1, nlags=5, nlow=20, nhigh=40):
 
     # Volatility feature
     nvol = findBestWindow(rend, prices["values"].values)
+    print("nvol = "+str(nvol))
     vols = getVolatilityVect(rend, nvol)
     volatility_df = pd.DataFrame({"vols": vols})
 
@@ -390,21 +391,94 @@ def findBestArchitecture(dataset, max_hidden=5, max_neurons=5):
 
 df, interest_rate, _high, _low = downloadData()
 
-rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
-plt.plot([FACP(rend, i) for i in range(20)], ".")
+df.plot(figsize=(10,7))
+plt.title("USDMXN FIX")
+plt.xlabel("Fecha")
+plt.ylabel("MXN")
+plt.grid()
 plt.show()
+
+interest_rate.plot(figsize=(10,7))
+plt.title("Tasa de interés")
+plt.xlabel("Fecha")
+plt.ylabel("Interés (%)")
+plt.grid()
+plt.show()
+
+plt.figure(figsize=(10, 7))
+plt.plot(_high["values"], label="High")
+plt.plot(_low["values"], label="Low")
+plt.legend()
+plt.grid()
+plt.title("High and Low values")
+plt.xlabel("Timestamp")
+plt.ylabel("MXN")
+plt.show()
+
+
+rend = np.log(df["values"].iloc[1:].values/df["values"].iloc[:-1].values)
+plt.figure(figsize=(6,6))
+plt.plot([FACP(rend, i) for i in range(10)], ".")
+plt.title("Función de Autocorrelación Parcial: Rendimientos")
+plt.xlabel("Numero de rezago")
+plt.ylabel("Autocorrelación")
+plt.show()
+
+
+plt.figure(figsize=(6,6))
 plt.plot([FACP(df["values"].values - np.mean(df["values"].values), i)
-          for i in range(20)], ".")
+          for i in range(10)], ".")
+plt.title("Función de Autocorrelación Parcial: Precios")
+plt.xlabel("Numero de rezago")
+plt.ylabel("Autocorrelación")
 plt.show()
 
 input_data, output_data, vector, variables, normality_test = getInputOutput(
         (df, interest_rate, _high, _low), ndays=1, nlags=1, nlow=10, nhigh=20)
 
+variables.keys()
+
+
+variables["lowhigh"].plot(figsize=(10, 7))
+plt.title("Difference between moving average high-low")
+plt.xlabel("Timestamp")
+plt.ylabel("Difference (MXN)")
+plt.grid()
+plt.show()
+
+variables["volatility_df"].plot(figsize=(10, 7))
+plt.title("20 days volatility")
+plt.xlabel("Timestamp")
+plt.ylabel("Annual volatility")
+plt.grid()
+plt.show()
+
+
+variables["interest_returns"].plot(figsize=(10, 3))
+plt.grid()
+plt.title("Increases of Reference Interenst")
+plt.show()
+
+
+variables["rend_df"].plot(figsize=(10, 3))
+plt.title("Returns")
+plt.xlabel("Timestamp")
+plt.ylabel("%")
+plt.grid()
+plt.show()
+
+
+variables["rend_df"].plot(figsize=(10, 7), kind="kde")
+plt.grid()
+plt.title("Kernel Density Estimator: Returns")
+plt.show()
+
+
 
 dataset = mx.dataHandler.Dataset(input_data, output_data, normalize="minmax")
-mse, min_mse, min2_mse, best_hdl, best2_hdl = findBestArchitecture(dataset,
-                                                                  max_hidden=5,
-                                                                  max_neurons=5)
+#mse, min_mse, min2_mse, best_hdl, best2_hdl = findBestArchitecture(dataset,
+#                                                                  max_hidden=5,
+#                                                                  max_neurons=5)
 
 best_hdl
 best2_hdl
@@ -413,8 +487,8 @@ min2_mse
 
 # Create model
 
-_hdl = []  # best_hdl
-_epochs  = 2000
+_hdl = [2]  # best_hdl
+_epochs  = 1000
 mlp = mx.neuralNets.mlpRegressor(hidden_layers=_hdl)
 mlp.train(dataset=dataset, alpha=0.01, epochs=_epochs)
 train = mlp.train_results
@@ -426,27 +500,37 @@ mlp.test(dataset=dataset)["square_error"][-1]
 
 
 # visualize the training performance
+plt.figure(figsize=(10,7))
 plt.plot(np.arange(_epochs), mlp.epoch_error)
 plt.title("MSE per epoch.")
 plt.xlabel("Epoch")
 plt.ylabel("MSE")
+plt.grid()
 plt.show()
 
 
-train.errors.plot(kind="kde")
+train.errors.plot(kind="kde", figsize=(10, 7))
 test.errors.plot(kind="kde")
+plt.title("Error Kernel Density Estimator")
+plt.grid()
 plt.show()
 
 # normaltest(np.random.normal(0,1,1000))
 # stats.shapiro(np.random.normal(0,1,1000)) # is not normal if 2nd < 0.05
 
-train.errors.plot()
+train.errors.plot(figsize=(7,3))
+plt.title("Train Errors")
+plt.ylabel("Error")
+plt.xlabel("Sample")
 plt.show()
 
 stats.shapiro(train.errors.values)
 
 
-test.errors.plot()
+test.errors.plot(figsize=(7,3))
+plt.title("Test Errors")
+plt.ylabel("Error")
+plt.xlabel("Sample")
 plt.show()
 
 stats.shapiro(test.errors[test.errors.values < 0.2].values)
@@ -604,6 +688,12 @@ plt.text(0.5, 0.5,
 plt.axis('off')
 plt.show()
 
+# Save model
+weights = mlp.np_w
+biases = mlp.np_b
+
+results = {"weights": weights, "biases": biases, "errors": error_data}
+# np.save("results.npy", results)
 
 # Pack forecast info
 
@@ -626,7 +716,7 @@ estimates_log = {
                  "max_val": max_val,
                  "delta": delta}
 # saveEstimate(estimates_log)
-
+prices = variables["prices"]
 same_vals_error = prices.values[1:] - prices.values[:-1]
 np.sqrt(np.mean(list(map(lambda x: x**2, same_vals_error))))
 np.mean(same_vals_error)
